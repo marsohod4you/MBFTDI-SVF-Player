@@ -1,0 +1,16 @@
+This project implements SVF Player (both Linux and Windows).
+SVF (Serial Vector Format) file describes sequence of JTAG commands which do some useful function
+like loading image into FPGA or burn CPLD chip.
+
+Altera Quartus II or Xilinx ISE developer tools can generate FPGA/CPLD programming files in form of SVF.
+
+This SVF player works togather with MBFTDI programmer device based on FTDI 2232H chip.
+MBFTDI programmer is also Open Source Hardware Project developed by http://marsohod.org group.
+Schematic of programmer is there: http://marsohod.org/index.php/howtostart/progmbftdi
+
+"Marsohod board" itself is simplest CPLD developer board based on Altera EPM240T100C5 CPLD chip.
+It is also Open Source Hardware Project.
+Blog about "marsohod board" is there: http://marsohod.org
+It gives educational articles about Altera Quartus II, Verilog and CPLD programming as well as many ready funny projects.
+
+
