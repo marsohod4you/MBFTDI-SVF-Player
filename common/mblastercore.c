@@ -296,10 +296,39 @@ FT_STATUS FT_Write_b(
 	return 0;
 }
 
+#define MAX_STRING_LENGTH (1024*4)
+char rbuffer[MAX_STRING_LENGTH];
+unsigned char rbytes[MAX_STRING_LENGTH];
+char command[MAX_STRING_LENGTH];
+int line;
+
+#define TAP_STATE_TLR 0
+#define TAP_STATE_RTI 1
+#define TAP_STATE_SELECT_DR_SCAN 2
+#define TAP_STATE_SELECT_IR_SCAN 3
+#define TAP_STATE_CAPTURE_DR 4
+#define TAP_STATE_CAPTURE_IR 5
+#define TAP_STATE_SHIFT_DR 6
+#define TAP_STATE_SHIFT_IR 7
+#define TAP_STATE_EXIT_1_DR 8
+#define TAP_STATE_EXIT_1_IR 9
+#define TAP_STATE_PAUSE_DR 10
+#define TAP_STATE_PAUSE_IR 11
+#define TAP_STATE_EXIT_2_DR 12
+#define TAP_STATE_EXIT_2_IR 13
+#define TAP_STATE_UPDATE_DR 14
+#define TAP_STATE_UPDATE_IR 15
+
+int g_def_end_state_dr = TAP_STATE_RTI;
+int g_def_end_state_ir = TAP_STATE_RTI;
+int g_least_runtest_state = TAP_STATE_RTI;
+int g_tap_state = TAP_STATE_RTI;
+
 // Navigage TMS to desired state with no TDO read back
 // please do 0<num_shifts<8
-void tms_command_nr(unsigned char num_shifts, unsigned char pattern, unsigned char least_bit)
+void tms_command(unsigned char num_shifts, unsigned char pattern, unsigned char least_bit, int target_tap_state)
 {
+g_tap_state = target_tap_state;
 dwNumBytesToSend = 0;
 // Don't read data
 byOutputBuffer[dwNumBytesToSend++] = 0x4B;
@@ -311,6 +340,16 @@ byOutputBuffer[dwNumBytesToSend++] = pattern | (least_bit<<7);
 ftStatus = FT_Write_b(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
 }
 
+void tap_navigate(int start_state, int end_state)
+{
+	if(start_state==TAP_STATE_PAUSE_IR && end_state==TAP_STATE_RTI)
+		tms_command(3,3,0,TAP_STATE_RTI);
+	else
+	if(start_state==TAP_STATE_PAUSE_DR && end_state==TAP_STATE_RTI)
+		tms_command(3,3,0,TAP_STATE_RTI);
+	else
+		printf("Not implemented TAP navigate sequence %5 %d\n",start_state,end_state);
+}
 
 //clear input buffer by reading it
 void read_all()
@@ -408,7 +447,7 @@ void goto_tlr()
 {
 	// Navigage TMS to Test-Logic-Reset (TMS=1 more then 4 times) then Idle (TMS=0 once)
 	// // Data is shifted LSB first, so: 011111 >>> chip
-	tms_command_nr(6,0x1f,0);	
+	tms_command(6,0x1f,0,TAP_STATE_TLR);	
 }
 
 //current state is Idle and stay Idle for some clocks
@@ -416,7 +455,73 @@ void Idle()
 {
 	// Idle (TMS=0 any times)
 	// Data is shifted LSB first, so the TMS pattern is 000000 >>> chip
-	tms_command_nr(6,0,0);
+	tms_command(6,0,0,TAP_STATE_RTI);
+}
+
+//define default end state for DR scan operation
+//possible commands are:
+//ENDDR IRPAUSE;
+//ENDDR IDLE;
+//ENDDR RESET;
+void do_ENDDR()
+{
+	//use simplified "one char" command recognition
+	//is it OK?
+	if(rbuffer[7]=='R')
+	{
+		//default is PAUSE
+		g_def_end_state_dr = TAP_STATE_PAUSE_DR;
+	}
+	else
+	if(rbuffer[7]=='D')
+	{
+		//default is IDLE
+		g_def_end_state_dr = TAP_STATE_RTI;
+	}
+	else
+	if(rbuffer[7]=='E')
+	{
+		//default is RESET
+		g_def_end_state_dr = TAP_STATE_TLR;
+	}
+	else
+	{
+		//oops....
+		printf("unknown ENDDR command parameter in line: %s",rbuffer);
+	}
+}
+
+//define default end state for IR scan operation
+//possible commands are:
+//ENDIR IRPAUSE;
+//ENDIR IDLE;
+//ENDIR RESET;
+void do_ENDIR()
+{
+	//use simplified "one char" command recognition
+	//is it OK?
+	if(rbuffer[7]=='R')
+	{
+		//default is PAUSE
+		g_def_end_state_ir = TAP_STATE_PAUSE_IR;
+	}
+	else
+	if(rbuffer[7]=='D')
+	{
+		//default is IDLE
+		g_def_end_state_ir = TAP_STATE_RTI;
+	}
+	else
+	if(rbuffer[7]=='E')
+	{
+		//default is RESET
+		g_def_end_state_ir = TAP_STATE_TLR;
+	}
+	else
+	{
+		//oops....
+		printf("unknown ENDIR command parameter in line: %s",rbuffer);
+	}
 }
 
 int sir(int nclk, int val)
@@ -424,7 +529,7 @@ int sir(int nclk, int val)
 	if(check_answer(true)==0)
 	{
 		printf("error on check answer\n");
-		return 0;
+		//return 0;
 	}
 
 	if(nclk<10)
@@ -433,8 +538,14 @@ int sir(int nclk, int val)
 		return 0;
 	}
 
-	//enter to state where we shifh IR
-	tms_command_nr(4,0x03,0);
+	//go to idle if not idle now
+	if(g_tap_state != TAP_STATE_RTI)
+	{
+		tap_navigate(g_tap_state,TAP_STATE_RTI);
+	}
+
+	//from Idle enter to state where we SHIFT IR
+	tms_command(4,0x03,0,TAP_STATE_SHIFT_IR);
 
 	dwNumBytesToSend = 0;
 	byOutputBuffer[dwNumBytesToSend++] = 0x1b;
@@ -445,8 +556,16 @@ int sir(int nclk, int val)
 	byOutputBuffer[dwNumBytesToSend++] = (val>>8)&0xFF;
 	ftStatus = FT_Write_b(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
 
-	//go back from IR shift to Idle
-	tms_command_nr(3,0x03,((val>>(nclk-1))&1));
+	//exit from Shift-IR state depends on target state (defined by ENDIR command)
+	if(g_def_end_state_ir == TAP_STATE_RTI)
+		tms_command(3,0x03,((val>>(nclk-1))&1),TAP_STATE_RTI); //go to idle
+	else
+	if(g_def_end_state_ir == TAP_STATE_PAUSE_IR)
+		tms_command(2,0x01,((val>>(nclk-1))&1),TAP_STATE_PAUSE_IR); //go to pause
+	else
+	if(g_def_end_state_ir == TAP_STATE_TLR)
+		tms_command(6,0x3b,((val>>(nclk-1))&1),TAP_STATE_TLR); //go to reset
+
 	return 0;
 }
 
@@ -500,12 +619,6 @@ int runidle(int num)
 	}
 	return ftStatus;
 }
-
-#define MAX_STRING_LENGTH (1024*4)
-char rbuffer[MAX_STRING_LENGTH];
-unsigned char rbytes[MAX_STRING_LENGTH];
-char command[MAX_STRING_LENGTH];
-int line;
 
 //process typical strings:
 //SIR 10 TDI (203);
@@ -707,8 +820,14 @@ int sdr_nbits(unsigned int nbits, unsigned int has_tdo, unsigned int has_mask, u
 	if(nbits<1)
 		return 0;
 
-	//go to state where we can shift DR
-	tms_command_nr(3,0x01,0);
+	//go to idle if not idle now
+	if(g_tap_state != TAP_STATE_RTI)
+	{
+		tap_navigate(g_tap_state,TAP_STATE_RTI);
+	}
+
+	//from Idle go to state where we can shift DR
+	tms_command(3,0x01,0,TAP_STATE_SHIFT_DR);
 
 	//calc "offset" - index of least thetrade from array of tdi data
 	offset = sdr_tdi_sz-1;
@@ -767,7 +886,7 @@ int sdr_nbits(unsigned int nbits, unsigned int has_tdo, unsigned int has_mask, u
 	byOutputBuffer[dwNumBytesToSend++] = 0x4B | cmd_mask;
 	// Number of clock pulses = Length + 1 (1 clocks here)
 	byOutputBuffer[dwNumBytesToSend++] = 0x00;
-	// Data is shifted LSB first, so the TMS pattern is 110
+	// Data is shifted LSB first
 	byOutputBuffer[dwNumBytesToSend++] = 0x01 | ( ((val_i>>nbits)&1)<<7 );
 	// Send off the TMS command
 	ftStatus = FT_Write_b(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
@@ -780,7 +899,15 @@ int sdr_nbits(unsigned int nbits, unsigned int has_tdo, unsigned int has_mask, u
 		check_answer(false);
 	}
 
-	tms_command_nr(2,0x01,0);
+	//exit from Exit1-DR state depends on target state (defined by ENDDR command)
+	if(g_def_end_state_dr == TAP_STATE_RTI)
+		tms_command(2,0x01,0,TAP_STATE_RTI);
+	else
+	if(g_def_end_state_dr == TAP_STATE_PAUSE_DR)
+		tms_command(1,0x00,0,TAP_STATE_PAUSE_DR);
+	else
+	if(g_def_end_state_dr == TAP_STATE_TLR)
+		tms_command(5,0x1d,0,TAP_STATE_TLR);
 return 0;
 }
 
@@ -1110,19 +1237,46 @@ RUNTEST 53 TCK;
 */
 void do_RUNTEST()
 {
+	int expected_state = -1;
+
 	//get command parameters
 	unsigned int tck = 0;
 	int n = sscanf(rbuffer,"RUNTEST %d TCK;",&tck);
 	if(n==1)
 	{
 		//1 param
+		expected_state = g_least_runtest_state;
 	}
 	else
 	{
 		n = sscanf(rbuffer,"RUNTEST IDLE %d TCK",&tck);
-		if(n==0)
-		 printf("error processing RUNTEST\n");
+		if(n)
+			expected_state = TAP_STATE_RTI;
+		else
+		{
+			n = sscanf(rbuffer,"RUNTEST DRPAUSE %d TCK",&tck);
+			if(n)
+				expected_state = TAP_STATE_PAUSE_DR;
+			else
+			{
+				n = sscanf(rbuffer,"RUNTEST IRPAUSE %d TCK",&tck);
+				if(n)
+					expected_state = TAP_STATE_PAUSE_IR;
+				else
+				{
+					printf("error processing RUNTEST\n");
+				}
+			}
+		}
 	}
+
+	//check current TAP state aganst expected
+	if(g_tap_state != expected_state)
+	{
+		g_least_runtest_state = expected_state;
+		tap_navigate(g_tap_state,expected_state);
+	}
+
 	if(tck)
 		runidle(tck);
 }
@@ -1140,14 +1294,6 @@ void do_STATE()
 void do_TRST()
 {
 	goto_tlr();
-}
-
-void do_ENDDR()
-{
-}
-
-void do_ENDIR()
-{
 }
 
 void do_FREQUENCY()
