@@ -14,7 +14,7 @@
 
 //version variables
 int ver_major = 1;
-int ver_minor = 0;
+int ver_minor = 1;
 
 #ifndef _WINDOWS
 
@@ -302,6 +302,12 @@ unsigned char rbytes[MAX_STRING_LENGTH];
 char command[MAX_STRING_LENGTH];
 int line;
 
+//controller commands
+#define CMD_DATA2TMS_NR 0x4b
+#define CMD_DATABITS2TDI_NR 0x1b
+#define CMD_DATABYTES2TDI_NR 0x19
+
+//possible JTAG TAP states
 #define TAP_STATE_TLR 0
 #define TAP_STATE_RTI 1
 #define TAP_STATE_SELECT_DR_SCAN 2
@@ -331,7 +337,7 @@ void tms_command(unsigned char num_shifts, unsigned char pattern, unsigned char 
 g_tap_state = target_tap_state;
 dwNumBytesToSend = 0;
 // Don't read data
-byOutputBuffer[dwNumBytesToSend++] = 0x4B;
+byOutputBuffer[dwNumBytesToSend++] = CMD_DATA2TMS_NR;
 // Number of clock pulses, zero value mean 1 shift
 byOutputBuffer[dwNumBytesToSend++] = num_shifts-1;
 // Data is shifted LSB first, 8th bit of value will be used as least tdi bit
@@ -368,6 +374,22 @@ void read_all()
 	else
 	    break;
     }
+}
+
+void print_buffer(char* name, unsigned char* pbuffer, int len)
+{
+	int i;
+	int num=len;
+	if(num>256)
+		num=256;
+	printf("%s\n",name);
+	for(i=0; i<num; i++)
+	{
+		printf(" %02X",pbuffer[i]);
+		if(i>0 && (i&0xFF)==0)
+			printf("\n");
+	}
+	printf("\n");
 }
 
 //buffers where we store tdo expected answer to be compared with tdo real answer
@@ -413,6 +435,8 @@ int check_answer(BOOL force)
 	if(dwNumBytesToRead!=exp_buff_ptr)
 	{
 		printf("oops.. expect %d bytes read but got %d\n",exp_buff_ptr,dwNumBytesToRead);
+		exp_buff_ptr = 0;
+		return 0;
 	}
 
 	//Read out the data from input buffer
@@ -428,6 +452,10 @@ int check_answer(BOOL force)
 		exp_val = expect_buffer[i]  & expect_buffer_mask[i];
 		if( exp_val != got_val )
 		{
+			printf("compare TDO failed at %d\n",i);
+			print_buffer("Expect buffer:",expect_buffer,exp_buff_ptr);
+			print_buffer("Compare buffer:",compare_buffer,exp_buff_ptr);
+			print_buffer("Mask buffer:",expect_buffer_mask,exp_buff_ptr);
 			exp_buff_ptr=0;
 			return 0;
 		}
@@ -524,12 +552,18 @@ void do_ENDIR()
 	}
 }
 
+int g_num_tdo_errors = 0;
 int sir(int nclk, int val)
 {
 	if(check_answer(true)==0)
 	{
 		printf("error on check answer\n");
-		//return 0;
+		g_num_tdo_errors++;
+
+		//strange fact is that working with EPM7032S we get one-bit error in check silicon id
+		//let us skip only one error
+		if(g_num_tdo_errors>1)
+			return 0;
 	}
 
 	if(nclk<10)
@@ -548,10 +582,10 @@ int sir(int nclk, int val)
 	tms_command(4,0x03,0,TAP_STATE_SHIFT_IR);
 
 	dwNumBytesToSend = 0;
-	byOutputBuffer[dwNumBytesToSend++] = 0x1b;
+	byOutputBuffer[dwNumBytesToSend++] = CMD_DATABITS2TDI_NR;
 	byOutputBuffer[dwNumBytesToSend++] = 7;
 	byOutputBuffer[dwNumBytesToSend++] = val&0xFF;
-	byOutputBuffer[dwNumBytesToSend++] = 0x1b;
+	byOutputBuffer[dwNumBytesToSend++] = CMD_DATABITS2TDI_NR;
 	byOutputBuffer[dwNumBytesToSend++] = (nclk-8)-2;
 	byOutputBuffer[dwNumBytesToSend++] = (val>>8)&0xFF;
 	ftStatus = FT_Write_b(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
@@ -566,7 +600,7 @@ int sir(int nclk, int val)
 	if(g_def_end_state_ir == TAP_STATE_TLR)
 		tms_command(6,0x3b,((val>>(nclk-1))&1),TAP_STATE_TLR); //go to reset
 
-	return 0;
+	return 1;
 }
 
 int runidle(int num)
@@ -615,14 +649,14 @@ int runidle(int num)
 	if(num_>1000000)
 	{
 		flush();
-		Sleep(500);
+		Sleep(100);
 	}
 	return ftStatus;
 }
 
 //process typical strings:
 //SIR 10 TDI (203);
-void do_SIR()
+int do_SIR()
 {
 	//get command parameters
 	unsigned int sir_arg = 0;
@@ -631,8 +665,9 @@ void do_SIR()
 	if(n!=2)
 	{
 		printf("error processing SIR\n");
+		return 0;
 	}
-	sir(sir_arg,tdi_arg);
+	return sir(sir_arg,tdi_arg);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -759,7 +794,7 @@ unsigned int send_sdr_block(unsigned int num_bytes, unsigned int offset, unsigne
 		cmd_mask = 0x00;
 
 	dwNumBytesToSend = 0;
-	byOutputBuffer[dwNumBytesToSend++] = 0x19 | cmd_mask;
+	byOutputBuffer[dwNumBytesToSend++] = CMD_DATABYTES2TDI_NR | cmd_mask;
 	byOutputBuffer[dwNumBytesToSend++] =  (num_bytes-1) & 0xFF;
 	byOutputBuffer[dwNumBytesToSend++] = ((num_bytes-1) >>8 ) & 0xFF;
 	ftStatus = FT_Write_b(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
@@ -867,7 +902,7 @@ int sdr_nbits(unsigned int nbits, unsigned int has_tdo, unsigned int has_mask, u
 
 		//send some least bits but not last
 		dwNumBytesToSend = 0;
-		byOutputBuffer[dwNumBytesToSend++] = 0x1b | cmd_mask;
+		byOutputBuffer[dwNumBytesToSend++] = CMD_DATABITS2TDI_NR | cmd_mask;
 		byOutputBuffer[dwNumBytesToSend++] = nbits-1;
 		byOutputBuffer[dwNumBytesToSend++] = val_i;
 		ftStatus = FT_Write_b(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
@@ -883,7 +918,7 @@ int sdr_nbits(unsigned int nbits, unsigned int has_tdo, unsigned int has_mask, u
 
 	//send last bit with TMS command
 	dwNumBytesToSend = 0;
-	byOutputBuffer[dwNumBytesToSend++] = 0x4B | cmd_mask;
+	byOutputBuffer[dwNumBytesToSend++] = CMD_DATA2TMS_NR | cmd_mask;
 	// Number of clock pulses = Length + 1 (1 clocks here)
 	byOutputBuffer[dwNumBytesToSend++] = 0x00;
 	// Data is shifted LSB first
@@ -1302,6 +1337,7 @@ void do_FREQUENCY()
 	float freq = 1000000;
 	float freq_achived;
 	sscanf(rbuffer,"FREQUENCY %f",&freq);
+	dwNumBytesToSend = 0;
 
 	//iterate to find proper clock divider
 	for(clk_div=0; clk_div<0x10000; clk_div++)
@@ -1336,15 +1372,12 @@ int play_svf(FILE* f)
 {
 	//open connection to ftdi chip
 	if(ftdi_init())
-		return 1;
+		return 0;
 
 	// Wait for all the USB stuff to complete and work
 	Sleep(50);
 
 	configure_mpsse();
-
-	//get_id();
-
 	read_all();
 
 	//read and process SVF file
@@ -1383,7 +1416,7 @@ int play_svf(FILE* f)
 			if(check_answer(true)==0)
 			{
 				printf("error on check TDO answer\n");
-				return 1;
+				return 0;
 			}
 
 			//check important commented lines
@@ -1405,10 +1438,18 @@ int play_svf(FILE* f)
 			line++;
 			//real command is here
 			if(strcmp(command,"SIR")==0)
-				do_SIR();
+			{
+				if(do_SIR()==0)
+				{
+					//probably error on check answer
+					return 0;
+				}
+			}
 			else
 			if(strcmp(command,"SDR")==0)
+			{
 				do_SDR(f);
+			}
 			else
 			if(strcmp(command,"RUNTEST")==0)
 				do_RUNTEST();
@@ -1455,7 +1496,7 @@ int play_svf(FILE* f)
 	
 	free_sdr_data();
 	close_ftdi();
-	return 0;
+	return 1;
 }
 
 
