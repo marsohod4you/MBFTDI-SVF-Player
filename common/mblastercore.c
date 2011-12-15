@@ -354,7 +354,7 @@ void tap_navigate(int start_state, int end_state)
 	if(start_state==TAP_STATE_PAUSE_DR && end_state==TAP_STATE_RTI)
 		tms_command(3,3,0,TAP_STATE_RTI);
 	else
-		printf("Not implemented TAP navigate sequence %5 %d\n",start_state,end_state);
+		printf("Not implemented TAP navigate sequence %d %d\n",start_state,end_state);
 }
 
 //clear input buffer by reading it
