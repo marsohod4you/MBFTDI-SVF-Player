@@ -162,7 +162,7 @@ BOOL bCommandEchod;
 // -----------------------------------------------------------
 // Reset output buffer pointer
 dwNumBytesToSend=0;
-//Add bogus command ‘xAA’ to the queue
+//Add bogus command 'xAA' to the queue
 byOutputBuffer[dwNumBytesToSend++] = 0xAA;
 // Send off the BAD commands
 ftStatus = FT_Write(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
