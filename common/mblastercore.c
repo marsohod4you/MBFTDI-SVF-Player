@@ -41,9 +41,15 @@ DWORD dwNumBytesSent = 0; // Count of actual bytes sent - used with FT_Write
 DWORD dwNumBytesToRead = 0; // Number of bytes available to read in the driver's input buffer
 DWORD dwNumBytesRead = 0; // Count of actual bytes read - used with FT_Read
 DWORD dwClockDivisor = 29; // Value of clock divisor, SCL Frequency = 60/((1+vl)*2) (MHz)
+BOOL ft232H = 0; // High speed device (FTx232H) found. Default - full speed, i.e. FT2232D
 
 int ftdi_init()
 {
+FT_DEVICE ftDevice; 
+DWORD deviceID; 
+char SerialNumber[16+1]; 
+char Description[64+1]; 
+
 // Does an FTDI device exist?
 printf("Checking for FTDI devices...\n");
 ftStatus = FT_CreateDeviceInfoList(&dwNumDevs);
@@ -74,6 +80,33 @@ if (ftStatus != FT_OK)
 	printf("If runing on Linux then try <rmmod ftdi_sio> first\n");
 	return 1; // Exit with error
 }
+
+memset(SerialNumber, 0, sizeof(SerialNumber));
+memset(Description, 0, sizeof(Description));
+// Detecting device type, hi-speed or full-speed
+ftStatus = FT_GetDeviceInfo( 
+    ftHandle, 
+    &ftDevice, 
+    &deviceID, 
+    SerialNumber, 
+    Description, 
+    NULL 
+    ); 
+
+ft232H = 0;
+  // deviceID contains encoded device ID 
+  // SerialNumber, Description contain 0-terminated strings  
+if (ftStatus == FT_OK) { 
+	printf("Device: %s\nSerial: %s\n", Description, SerialNumber);
+	if (/* ftDevice == FT_DEVICE_232H || */ ftDevice == FT_DEVICE_4232H || ftDevice == FT_DEVICE_2232H) 
+	{
+		printf("Hi-speed device (FT232H, FT2232H or FT4232H) detected\n");
+		ft232H = 1;
+	}
+} 
+else { 
+	printf("FT_GetDeviceType FAILED!\n");
+} 
 
 // Configure port parameters
 printf("Configuring port for MPSSE use...\n");
@@ -129,7 +162,7 @@ BOOL bCommandEchod;
 // -----------------------------------------------------------
 // Reset output buffer pointer
 dwNumBytesToSend=0;
-//Add bogus command ‘xAA’ to the queue
+//Add bogus command 'xAA' to the queue
 byOutputBuffer[dwNumBytesToSend++] = 0xAA;
 // Send off the BAD commands
 ftStatus = FT_Write(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
@@ -170,13 +203,16 @@ if (bCommandEchod == false)
 // Start with a fresh index
 dwNumBytesToSend = 0;
 
-// Use 60MHz master clock (disable divide by 5)
-byOutputBuffer[dwNumBytesToSend++] = 0x8A;
-// Turn off adaptive clocking (may be needed for ARM)
-byOutputBuffer[dwNumBytesToSend++] = 0x97;
-// Disable three-phase clocking
-byOutputBuffer[dwNumBytesToSend++] = 0x8D;
-ftStatus = FT_Write(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
+if (ft232H)
+{
+	// Use 60MHz master clock (disable divide by 5)
+	byOutputBuffer[dwNumBytesToSend++] = 0x8A;
+	// Turn off adaptive clocking (may be needed for ARM)
+	byOutputBuffer[dwNumBytesToSend++] = 0x97;
+	// Disable three-phase clocking
+	byOutputBuffer[dwNumBytesToSend++] = 0x8D;
+	ftStatus = FT_Write(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
+}
 
 // Send off the HS-specific commands
 
@@ -606,18 +642,29 @@ int sir(int nclk, int val)
 int runidle(int num)
 {
 	int num_ = num;
+	int block_size;
+
+	if (ft232H) block_size=0xFFFF; else block_size=sizeof(byOutputBuffer)-4;
+
+	memset(byOutputBuffer, 0, sizeof(byOutputBuffer));
+
 	if(num>8)
 	{
 		while(1)
 		{
-			if( num >= (0xFFFF+1)*8 )
+			if( num >= (block_size+1)*8 )
 			{
 				dwNumBytesToSend = 0;
-				byOutputBuffer[dwNumBytesToSend++] = 0x8F;
-				byOutputBuffer[dwNumBytesToSend++] = 0xFF;
-				byOutputBuffer[dwNumBytesToSend++] = 0xFF;
+				byOutputBuffer[dwNumBytesToSend++] = 0x8F; 
+				byOutputBuffer[dwNumBytesToSend++] = (block_size) & 0xFF;
+				byOutputBuffer[dwNumBytesToSend++] = (block_size >> 8) & 0xFF;
+				if (!ft232H)
+				{
+					byOutputBuffer[0] = 0x10;
+					dwNumBytesToSend += block_size + 1;
+				}
 				ftStatus = FT_Write_b(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
-				num = num - (0xFFFF+1)*8;
+				num = num - (block_size + 1)*8;
 				continue;
 			}
 			else
@@ -630,6 +677,11 @@ int runidle(int num)
 					byOutputBuffer[dwNumBytesToSend++] = 0x8F;
 					byOutputBuffer[dwNumBytesToSend++] = n&0xFF;
 					byOutputBuffer[dwNumBytesToSend++] = (n>>8)&0xFF;
+					if (!ft232H)
+					{
+						byOutputBuffer[0] = 0x10;
+						dwNumBytesToSend += n + 1;
+					}
 					ftStatus = FT_Write_b(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
 				}
 				break;
@@ -642,6 +694,11 @@ int runidle(int num)
 		dwNumBytesToSend = 0;
 		byOutputBuffer[dwNumBytesToSend++] = 0x8e;
 		byOutputBuffer[dwNumBytesToSend++] = num-1;
+		if (!ft232H)
+		{
+			byOutputBuffer[0] = 0x12;
+			dwNumBytesToSend++;
+		}
 		// Send off
 		ftStatus = FT_Write_b(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
 	}
@@ -1336,16 +1393,19 @@ void do_FREQUENCY()
 	unsigned int clk_div;
 	float freq = 1000000;
 	float freq_achived;
+	float base_clock = 30000000; // 30MHz for 2232H, 6MHz for 2232D
+	if (!ft232H) base_clock = 6000000;
+
 	sscanf(rbuffer,"FREQUENCY %f",&freq);
 	dwNumBytesToSend = 0;
 
 	//iterate to find proper clock divider
 	for(clk_div=0; clk_div<0x10000; clk_div++)
 	{
-		freq_achived = (float)30000000/(float)(clk_div+1);
+		freq_achived = base_clock/(float)(clk_div+1);
 		if(freq_achived<=freq)
 		{
-			printf("Frequency is set to %eHz (FTDI clk divider %04X), requred %eHz\n",freq_achived,clk_div,freq);
+			printf("Frequency is set to %.2gMHz (FTDI clk divider %04X), requred %.2gMHz\n",freq_achived/1000000,clk_div,freq/1000000);
 
 			//Command to set clock divisor
 			byOutputBuffer[dwNumBytesToSend++] = 0x86;
@@ -1498,6 +1558,3 @@ int play_svf(FILE* f)
 	close_ftdi();
 	return 1;
 }
-
-
-
