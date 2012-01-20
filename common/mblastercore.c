@@ -14,7 +14,7 @@
 
 //version variables
 int ver_major = 1;
-int ver_minor = 1;
+int ver_minor = 2;
 
 #ifndef _WINDOWS
 

@@ -1,7 +1,7 @@
 CC=gcc
 
-LIBPATH = /home/nick/myftdi/libftd2xx1.0.4/build/i386
-INCPATH = /home/nick/myftdi/libftd2xx1.0.4
+LIBPATH = /home/nick/myftdi/x86_64
+INCPATH = /home/nick/myftdi/
 
 
 CFLAGS  =-ldl -lrt -lpthread
