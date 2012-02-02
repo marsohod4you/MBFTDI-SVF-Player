@@ -15,7 +15,7 @@ extern int ver_minor;
 
 int main(int argc, char* argv[])
 {
-	printf("mbftdi v%d.%d - burn MAX2 CPLD from Altera Vector Programming File *.svf\n",ver_major,ver_minor);
+	printf("mbftdi v%d.%d - execute Altera Vector Programming File *.svf\n",ver_major,ver_minor);
 	printf("FTDI port to JTAG is used for programming\n");
 	printf("Usage example: >mbftdi myfile.svf\n\n");
 
