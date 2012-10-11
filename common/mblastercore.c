@@ -941,13 +941,16 @@ int sdr_nbits(unsigned int nbits, unsigned int has_tdo, unsigned int has_mask, u
 
 	//get last byte from tdi, tdo, mask arrays
 	val_i  = psdr_tdi_data[offset];
-	val_i |= psdr_tdi_data[offset-1]<<4;
+	if(offset)
+	    val_i |= psdr_tdi_data[offset-1]<<4;
 
 	val_o  = psdr_tdo_data[offset];
-	val_o |= psdr_tdo_data[offset-1]<<4;
+	if(offset)
+	    val_o |= psdr_tdo_data[offset-1]<<4;
 
 	val_m  = psdr_mask_data[offset];
-	val_m |= psdr_mask_data[offset-1]<<4;
+	if(offset)
+	    val_m |= psdr_mask_data[offset-1]<<4;
 
 	//define we need read answer or not
 	cmd_mask = 0;
@@ -1243,7 +1246,6 @@ int do_SDR(FILE* f)
 
 	//how many bytes? calculate space required and allocate
 	num_bytes = (num_bits+7)/8;
-
 	//each byte takes 2 chars in string, plus we reserve 8 additional bytes for safity
 	if(alloc_sdr_data(num_bytes*2+8)==0)
 	{
@@ -1316,7 +1318,6 @@ int do_SDR(FILE* f)
 			printf("syntax error for SDR command, expected char ( after TDI word\n");
 			return 0;
 		}
-
 		//now expect to read hexadecimal array of tdi data
 		ptr = read_hex_array(ptr,pdest,num_bits,f,pdest_count,&r);
 	}
