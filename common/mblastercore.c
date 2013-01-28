@@ -14,7 +14,7 @@
 
 //version variables
 int ver_major = 1;
-int ver_minor = 3;
+int ver_minor = 4;
 
 #ifndef _WINDOWS
 
@@ -589,7 +589,7 @@ void do_ENDIR()
 }
 
 int g_num_tdo_errors = 0;
-int sir(int nclk, int val)
+int sir(int nclk, unsigned int val)
 {
 	if(check_answer(true)==0)
 	{
@@ -602,7 +602,7 @@ int sir(int nclk, int val)
 			return 0;
 	}
 
-	if(nclk<10)
+	if( nclk==0 || nclk>32 )
 	{
 		printf("error SIR parameters\n");
 		return 0;
@@ -618,23 +618,36 @@ int sir(int nclk, int val)
 	tms_command(4,0x03,0,TAP_STATE_SHIFT_IR);
 
 	dwNumBytesToSend = 0;
-	byOutputBuffer[dwNumBytesToSend++] = CMD_DATABITS2TDI_NR;
-	byOutputBuffer[dwNumBytesToSend++] = 7;
-	byOutputBuffer[dwNumBytesToSend++] = val&0xFF;
-	byOutputBuffer[dwNumBytesToSend++] = CMD_DATABITS2TDI_NR;
-	byOutputBuffer[dwNumBytesToSend++] = (nclk-8)-2;
-	byOutputBuffer[dwNumBytesToSend++] = (val>>8)&0xFF;
+
+	while(nclk>8)
+	{
+		byOutputBuffer[dwNumBytesToSend++] = CMD_DATABITS2TDI_NR;
+		byOutputBuffer[dwNumBytesToSend++] = 7; //mean we are sending 8 bits
+		byOutputBuffer[dwNumBytesToSend++] = val&0xFF;
+		val  = val>>8;	
+		nclk = nclk-8;	//remember we had sent 8 bits
+	}
+
+	//send few bits except least one
+	if(nclk>1)
+	{
+		byOutputBuffer[dwNumBytesToSend++] = CMD_DATABITS2TDI_NR;
+		byOutputBuffer[dwNumBytesToSend++] = nclk-2;	//mean we are sending (nclk-1) bits
+		byOutputBuffer[dwNumBytesToSend++] = val&0xFF;
+		val = val >> (nclk-1);
+	}
 	ftStatus = FT_Write_b(ftHandle, byOutputBuffer, dwNumBytesToSend, &dwNumBytesSent);
 
 	//exit from Shift-IR state depends on target state (defined by ENDIR command)
+	//also this should sent least bit from command
 	if(g_def_end_state_ir == TAP_STATE_RTI)
-		tms_command(3,0x03,((val>>(nclk-1))&1),TAP_STATE_RTI); //go to idle
+		tms_command(3,0x03,(val&1),TAP_STATE_RTI); //go to idle
 	else
 	if(g_def_end_state_ir == TAP_STATE_PAUSE_IR)
-		tms_command(2,0x01,((val>>(nclk-1))&1),TAP_STATE_PAUSE_IR); //go to pause
+		tms_command(2,0x01,(val&1),TAP_STATE_PAUSE_IR); //go to pause
 	else
 	if(g_def_end_state_ir == TAP_STATE_TLR)
-		tms_command(6,0x3b,((val>>(nclk-1))&1),TAP_STATE_TLR); //go to reset
+		tms_command(6,0x3b,(val&1),TAP_STATE_TLR); //go to reset
 
 	return 1;
 }
