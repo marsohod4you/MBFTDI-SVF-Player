@@ -5,6 +5,8 @@
 
 #ifdef _WINDOWS
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
 
 #include <ftd2xx.h>
