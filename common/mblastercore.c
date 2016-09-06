@@ -7,7 +7,7 @@
 #include <windows.h>
 #endif
 
-#include "ftd2xx.h"
+#include <ftd2xx.h>
 
 #define true 1
 #define false 0

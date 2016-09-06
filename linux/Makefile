@@ -1,12 +1,10 @@
 CC=gcc
 
-LIBPATH = /home/nick/myftdi/x86_64
-INCPATH = /home/nick/myftdi/
-
+LIBPATH = ./raspberry
+INCPATH = ./raspberry
 
 CFLAGS  =-ldl -lrt -lpthread
 CFLAGS += $(LIBPATH)/libftd2xx.a
-CFLAGS += -I../common
 CFLAGS += -I$(INCPATH)
 
 APP = mbftdi

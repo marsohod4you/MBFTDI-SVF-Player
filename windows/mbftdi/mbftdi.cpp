@@ -8,7 +8,7 @@
 //----------------------------------------------------------------------------
 //  Include the following 2 lines in your header-file
 #pragma comment(lib, "FTD2XX.lib")
-#include "../../common/FTD2XX.h"
+#include "FTD2XX.h"
 //============================================================================
 
 extern "C" int play_svf(FILE* f);
