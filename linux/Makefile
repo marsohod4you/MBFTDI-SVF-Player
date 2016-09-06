@@ -1,10 +1,12 @@
 CC=gcc
 
-LIBPATH = ./raspberry
-INCPATH = ./raspberry
+#LIBPATH = ./raspberry
+#INCPATH = ./raspberry
+LIBPATH = ./x64
+INCPATH = ./x64
 
-CFLAGS  =-ldl -lrt -lpthread
-CFLAGS += $(LIBPATH)/libftd2xx.a
+CFLAGS  = $(LIBPATH)/libftd2xx.a
+CFLAGS += -ldl -lrt -lpthread
 CFLAGS += -I$(INCPATH)
 
 APP = mbftdi
