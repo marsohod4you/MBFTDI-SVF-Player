@@ -1,1 +1,8 @@
 linux/mbftdi
+windows/mbftdi/Debug
+windows/mbftdi/Release
+windows/Debug
+windows/Release
+windows/.vs
+windows/*.opendb
+windows/*.db
