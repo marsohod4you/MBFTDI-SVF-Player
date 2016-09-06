@@ -4,7 +4,7 @@
 #include <errno.h>
 #include <string.h>
 
-#include "../common/ftd2xx.h"
+#include <ftd2xx.h>
 
 #define false 0
 #define true 1
